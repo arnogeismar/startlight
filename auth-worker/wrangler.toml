@@ -1,0 +1,23 @@
+# Production:  npx wrangler deploy
+# Local dev:   npx wrangler deploy --env dev
+# Secrets are NOT stored here. Set them with:
+#   npx wrangler secret put GITHUB_CLIENT_SECRET              (production)
+#   npx wrangler secret put GITHUB_CLIENT_SECRET --env dev    (dev)
+
+name = "contract-hub-auth"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+# Production OAuth App (callback https://arnogeismar.github.io/startlight/)
+[vars]
+GITHUB_CLIENT_ID = "Ov23liiqdIDx9F9MCeCQ"
+# Origins allowed to call this Worker, comma-separated, no trailing slash or path.
+ALLOWED_ORIGINS = "https://arnogeismar.github.io"
+
+# Dev OAuth App (callback http://localhost:5173/)
+[env.dev]
+name = "contract-hub-auth-dev"
+
+[env.dev.vars]
+GITHUB_CLIENT_ID = "Ov23li3IqRVpqV2hk7wu"
+ALLOWED_ORIGINS = "http://localhost:5173"

@@ -1,7 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { HashRouter, Link, NavLink, Route, Routes } from 'react-router-dom';
 import { GitHub, type RepoRef } from './lib/github';
-import { SessionProvider, clearCredentials, readStoredCredentials, signIn, useSession, type User } from './lib/session';
+import { SessionProvider, clearCredentials, readStoredCredentials, signIn, storeCredentials, useSession, type User } from './lib/session';
+import { completeGitHubSignIn, revokeGitHubToken } from './lib/oauth';
 import { SignIn } from './pages/SignIn';
 import { Projects } from './pages/Projects';
 import { ProjectOverview } from './pages/ProjectOverview';
@@ -20,26 +21,45 @@ interface Auth {
 export function App() {
   const [auth, setAuth] = useState<Auth | null>(null);
   const [restoring, setRestoring] = useState(true);
+  const [signInError, setSignInError] = useState<unknown>(null);
 
   useEffect(() => {
-    const { token, stateRepo } = readStoredCredentials();
-    if (!token || !stateRepo) {
-      setRestoring(false);
-      return;
-    }
-    signIn(token, stateRepo)
-      .then(setAuth)
-      .catch(() => clearCredentials())
-      .finally(() => setRestoring(false));
+    let cancelled = false;
+    (async () => {
+      // Returning from GitHub's consent page?
+      let fresh: { token: string; stateRepo: string } | null = null;
+      try {
+        fresh = await completeGitHubSignIn();
+      } catch (e) {
+        if (!cancelled) setSignInError(e);
+        return;
+      }
+      const { token, stateRepo } = fresh ?? readStoredCredentials();
+      if (!token || !stateRepo) return;
+      try {
+        const result = await signIn(token, stateRepo);
+        if (cancelled) return;
+        storeCredentials(token, stateRepo);
+        setAuth(result);
+      } catch (e) {
+        if (cancelled) return;
+        clearCredentials();
+        if (fresh) setSignInError(e);
+      }
+    })().finally(() => !cancelled && setRestoring(false));
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const signOut = useCallback(() => {
+    revokeGitHubToken(readStoredCredentials().token);
     clearCredentials();
     setAuth(null);
   }, []);
 
   if (restoring) return <div className="center-page"><Spinner label="Signing in…" /></div>;
-  if (!auth) return <SignIn onSignedIn={setAuth} />;
+  if (!auth) return <SignIn initialError={signInError} />;
 
   return (
     <SessionProvider gh={auth.gh} user={auth.user} stateRepo={auth.repo} onSignOut={signOut}>

@@ -1,5 +1,5 @@
 // End-to-end smoke test: the built app in Chromium, with the GitHub REST API faked in memory.
-// Usage: npm run build && npx vite preview --port 4173 & npm run e2e
+// Usage: see README ("End-to-end smoke test"). The build must use VITE_OAUTH_EXCHANGE_URL=https://auth.test
 const { chromium } = require('playwright');
 const crypto = require('crypto');
 const BASE = process.env.BASE_URL || 'http://localhost:4173';
@@ -132,6 +132,24 @@ function handle(method, url, body) {
     await route.fulfill({ status, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(json) });
   });
   await page.route('https://github.com/**', (r) => r.fulfill({ status: 404, body: '' }));
+  // Fake GitHub's OAuth consent page: approve immediately and send the user back with a code.
+  let authorizeParams = null;
+  await page.route('https://github.com/login/oauth/authorize?**', (r) => {
+    authorizeParams = new URL(r.request().url()).searchParams;
+    const back = new URL(authorizeParams.get('redirect_uri'));
+    back.searchParams.set('code', 'test-code');
+    back.searchParams.set('state', authorizeParams.get('state'));
+    return r.fulfill({ status: 302, headers: { location: back.toString() } });
+  });
+  // Fake auth-worker: check PKCE and hand out a token.
+  await page.route('https://auth.test/**', async (r) => {
+    const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type' };
+    if (r.request().method() === 'OPTIONS') return r.fulfill({ status: 204, headers: cors });
+    const body = JSON.parse(r.request().postData() || '{}');
+    const challenge = crypto.createHash('sha256').update(body.code_verifier || '').digest('base64url');
+    const ok = body.code === 'test-code' && authorizeParams && challenge === authorizeParams.get('code_challenge');
+    return r.fulfill({ status: ok ? 200 : 400, contentType: 'application/json', headers: cors, body: JSON.stringify(ok ? { access_token: 'gho_test' } : { error: 'bad_verification_code' }) });
+  });
 
   const step = async (name, fn) => {
     try { await fn(); console.log('✓', name); }
@@ -142,11 +160,11 @@ function handle(method, url, body) {
   try {
     await page.goto(BASE + '/');
     await step('sign in', async () => {
-      await page.fill('input[type=password]', 'ghp_test');
       await page.fill('input[placeholder="owner/name"]', 'acme/hub-state');
       await shot('01-signin');
-      await page.click('button:has-text("Sign in")');
+      await page.click('button:has-text("Sign in with GitHub")');
       await page.waitForSelector('text=Set up Contract Hub');
+      if (new URL(page.url()).search) throw new Error('OAuth code left in URL: ' + page.url());
     });
     await step('initialize workspace', async () => {
       await page.click('button:has-text("Initialize workspace")');

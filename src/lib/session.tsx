@@ -56,7 +56,15 @@ export function readStoredCredentials() {
 
 export function storeCredentials(token: string, stateRepo: string) {
   localStorage.setItem(TOKEN_KEY, token);
-  localStorage.setItem(STATE_REPO_KEY, stateRepo);
+  storeStateRepo(stateRepo);
+}
+
+export function storeStateRepo(stateRepo: string) {
+  try {
+    localStorage.setItem(STATE_REPO_KEY, stateRepo);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function clearCredentials() {
@@ -72,7 +80,7 @@ export async function signIn(token: string, stateRepo: string): Promise<{ gh: Gi
   try {
     await gh.getRepo(repo);
   } catch {
-    throw new Error(`Cannot access ${stateRepo}. Check the name and that your token can read it.`);
+    throw new Error(`Cannot access ${stateRepo}. Check the name and that your GitHub account can read it.`);
   }
   return { gh, user, repo };
 }

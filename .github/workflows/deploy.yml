@@ -29,6 +29,9 @@ jobs:
         env:
           # Set a repository variable STATE_REPO (e.g. my-org/contract-hub-state) to prefill the sign-in screen.
           VITE_STATE_REPO: ${{ vars.STATE_REPO }}
+          # Sign in with GitHub. (Variable names can't start with GITHUB_, hence OAUTH_.)
+          VITE_GITHUB_CLIENT_ID: ${{ vars.OAUTH_CLIENT_ID }}
+          VITE_OAUTH_EXCHANGE_URL: ${{ vars.OAUTH_EXCHANGE_URL }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

@@ -38,16 +38,19 @@ repository, so every change to it is a reviewable commit.
 
 1. **Create a state repository**, e.g. `my-org/contract-hub-state` (private is fine). It only holds
    `contract-hub.json`.
-2. **Deploy the app.** Push this repo to GitHub and enable *Settings → Pages → Source: GitHub Actions*.
-   The workflow in `.github/workflows/deploy.yml` builds and publishes it. Optionally set a repository
-   variable `STATE_REPO` so the sign-in screen is prefilled. (Any static host works: `npm run build`
-   and serve `dist/`.)
-3. **Sign in** with a GitHub personal access token. A fine-grained token needs, on the state repo and the
-   repos you work with: *Contents* read/write, *Pull requests* read/write, *Metadata* read
-   (*Administration* write only if admins want to invite collaborators from the app). Read-only users
-   only need read access. The token is stored in the browser's `localStorage` and only sent to
-   `api.github.com`.
-4. The first person to sign in with write access to the state repo clicks **Initialize workspace** and
+2. **Set up Sign in with GitHub**: create a GitHub OAuth App and deploy the small token-exchange Worker in
+   [`auth-worker/`](auth-worker/README.md) to Cloudflare (free tier).
+3. **Deploy the app.** Push this repo to GitHub and enable *Settings → Pages → Source: GitHub Actions*.
+   The workflow in `.github/workflows/deploy.yml` builds and publishes it. Set these repository variables
+   (*Settings → Secrets and variables → Actions → Variables*):
+   - `OAUTH_CLIENT_ID`: the OAuth App's Client ID
+   - `OAUTH_EXCHANGE_URL`: the Worker URL, e.g. `https://contract-hub-auth.you.workers.dev`
+   - `STATE_REPO` (optional): prefills the workspace on the sign-in screen
+
+   (Any static host works: `npm run build` with those `VITE_*` variables and serve `dist/`.)
+4. **Sign in with GitHub.** Users approve the app's `repo` scope once. The token is kept in the browser's
+   `localStorage` and only sent to `api.github.com` (and to the Worker on sign-out, to revoke it).
+5. The first person to sign in with write access to the state repo clicks **Initialize workspace** and
    becomes the first admin.
 
 ## Security model (important)
@@ -69,19 +72,24 @@ same as today. Protect your default branches so every contract change goes throu
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173
+cp .env.example .env   # fill in VITE_GITHUB_CLIENT_ID + VITE_OAUTH_EXCHANGE_URL (a dev OAuth App with callback http://localhost:5173/)
+npm run dev            # http://localhost:5173
 npm test           # unit tests (parsing, extraction, validation, ref renames, permissions, YAML preservation)
 npm run typecheck
 npm run build
 
-# End-to-end smoke test against a faked GitHub API (no real GitHub calls)
-npm run build && (npx vite preview --port 4173 &) && npm run e2e
+# End-to-end smoke test against a faked GitHub API and OAuth flow (no real GitHub calls)
+npx playwright install --with-deps chromium   # once
+VITE_GITHUB_CLIENT_ID=test VITE_OAUTH_EXCHANGE_URL=https://auth.test npm run build
+(npx vite preview --port 4173 &) && npm run e2e
 ```
 
 ### Code map
 
 | Path | What |
 | --- | --- |
+| `src/lib/oauth.ts` | Sign in with GitHub (OAuth web flow with PKCE + state) |
+| `auth-worker/` | Cloudflare Worker that exchanges the OAuth code for a token (holds the client secret) |
 | `src/lib/github.ts` | GitHub API wrapper (files, trees, branches, PRs, collaborators) |
 | `src/lib/state.ts` | `contract-hub.json` model, permission checks, optimistic-locking updates |
 | `src/lib/scan.ts` | Finds contracts in a repo tree |
@@ -109,9 +117,10 @@ npm run build && (npx vite preview --port 4173 &) && npm run e2e
 
 ### Known limitations
 
-- Sign-in uses a personal access token. GitHub's OAuth web flow needs a server-side secret exchange;
-  if you want "Sign in with GitHub", add a tiny token-exchange function (e.g. a Cloudflare Worker) and
-  swap it in for the token form.
+- Sign-in uses a GitHub OAuth App with the `repo` scope, which covers every repository the user can
+  access (the app only touches the ones added to the workspace). OAuth App tokens don't expire until the
+  user signs out or revokes the app. A GitHub App would allow per-repo, expiring tokens at the cost of
+  more setup.
 - Scanning reads every candidate `.json`/`.yaml` file (tooling files and `node_modules` etc. are
   skipped). In very large repos only files whose path hints at an API spec are scanned.
 - Only local `$ref`s (`#/…`) are resolved; references to other files are shown but not followed.

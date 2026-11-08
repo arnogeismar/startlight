@@ -100,7 +100,7 @@ function AddProject() {
       });
       setValue('');
     } catch (err) {
-      setError((err as { status?: number }).status === 404 ? new Error('Repository not found or your token cannot read it.') : err);
+      setError((err as { status?: number }).status === 404 ? new Error('Repository not found or your GitHub account cannot read it.') : err);
     } finally {
       setBusy(null);
     }

@@ -1,27 +1,29 @@
 import { useState } from 'react';
-import { readStoredCredentials, signIn, storeCredentials } from '../lib/session';
+import { readStoredCredentials, storeStateRepo } from '../lib/session';
+import { oauthConfigured, startGitHubSignIn } from '../lib/oauth';
+import { parseRepo } from '../lib/github';
 import { ErrorBox, Field } from '../components/ui';
-import type { GitHub, RepoRef } from '../lib/github';
-import type { User } from '../lib/session';
 
-export function SignIn({ onSignedIn }: { onSignedIn: (a: { gh: GitHub; user: User; repo: RepoRef }) => void }) {
+export function SignIn({ initialError }: { initialError?: unknown }) {
   const stored = readStoredCredentials();
-  const [token, setToken] = useState('');
   const [stateRepo, setStateRepo] = useState(stored.stateRepo);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
+  const [error, setError] = useState<unknown>(initialError ?? null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setBusy(true);
     setError(null);
+    const repo = stateRepo.trim();
+    if (!parseRepo(repo)) {
+      setError(new Error('Workspace must look like "owner/name".'));
+      return;
+    }
+    setBusy(true);
     try {
-      const result = await signIn(token.trim(), stateRepo.trim());
-      storeCredentials(token.trim(), stateRepo.trim());
-      onSignedIn(result);
+      storeStateRepo(repo);
+      await startGitHubSignIn(repo); // navigates away to GitHub
     } catch (err) {
-      setError((err as { status?: number }).status === 401 ? new Error('GitHub rejected that token.') : err);
-    } finally {
+      setError(err);
       setBusy(false);
     }
   }
@@ -33,27 +35,16 @@ export function SignIn({ onSignedIn }: { onSignedIn: (a: { gh: GitHub; user: Use
           <span className="brand-mark">{'{ }'}</span> Contract Hub
         </div>
         <p className="muted">Browse and edit the OpenAPI and AsyncAPI contracts in your GitHub repositories.</p>
-        <Field
-          label="GitHub personal access token"
-          hint="Fine-grained token with Contents + Pull requests (read & write) and Metadata (read) on the repos you work with. Stored only in this browser."
-        >
-          <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="github_pat_…" required autoFocus />
-        </Field>
         <Field label="Workspace (state repository)" hint="The repository that stores the project list and permissions, e.g. my-org/contract-hub-state.">
           <input value={stateRepo} onChange={(e) => setStateRepo(e.target.value)} placeholder="owner/name" required />
         </Field>
+        {!oauthConfigured && (
+          <ErrorBox error="Sign in with GitHub is not configured. Set VITE_GITHUB_CLIENT_ID and VITE_OAUTH_EXCHANGE_URL (see README)." />
+        )}
         {error != null && <ErrorBox error={error} />}
-        <button className="btn btn-primary btn-block" disabled={busy}>
-          {busy ? 'Signing in…' : 'Sign in'}
+        <button className="btn btn-primary btn-block" disabled={busy || !oauthConfigured}>
+          {busy ? 'Redirecting to GitHub…' : 'Sign in with GitHub'}
         </button>
-        <a
-          className="small"
-          href="https://github.com/settings/personal-access-tokens/new"
-          target="_blank"
-          rel="noreferrer"
-        >
-          Create a token on GitHub →
-        </a>
       </form>
     </div>
   );
